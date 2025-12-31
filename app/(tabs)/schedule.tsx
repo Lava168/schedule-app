@@ -1,41 +1,40 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet } from 'react-native';
+import React, { useCallback, useMemo } from 'react';
+import { View, Text, FlatList, Pressable, StyleSheet, SectionList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ScreenContainer } from '@/components/screen-container';
-import { Calendar } from '@/components/calendar';
 import { EventCard } from '@/components/event-card';
 import { useColors } from '@/hooks/use-colors';
 import { useEvents } from '@/lib/event-store';
-import { formatDate, formatDateDisplay } from '@/lib/date-utils';
+import { formatDateDisplay, getTodayString } from '@/lib/date-utils';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Event } from '@/types/event';
 
-export default function CalendarScreen() {
+interface Section {
+  title: string;
+  data: Event[];
+}
+
+export default function ScheduleScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { getEventsByDate, isLoading } = useEvents();
+  const { getUpcomingEvents, isLoading } = useEvents();
 
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const sections = useMemo(() => {
+    const events = getUpcomingEvents();
+    const grouped: Record<string, Event[]> = {};
 
-  const selectedDateStr = formatDate(selectedDate);
-  const selectedEvents = useMemo(
-    () => getEventsByDate(selectedDateStr),
-    [getEventsByDate, selectedDateStr]
-  );
+    events.forEach((event) => {
+      if (!grouped[event.date]) {
+        grouped[event.date] = [];
+      }
+      grouped[event.date].push(event);
+    });
 
-  const handlePrevMonth = useCallback(() => {
-    setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-  }, []);
-
-  const handleNextMonth = useCallback(() => {
-    setCurrentMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  }, []);
-
-  const handleSelectDate = useCallback((date: Date) => {
-    setSelectedDate(date);
-    setCurrentMonth(new Date(date.getFullYear(), date.getMonth(), 1));
-  }, []);
+    return Object.entries(grouped).map(([date, data]) => ({
+      title: date,
+      data,
+    }));
+  }, [getUpcomingEvents]);
 
   const handleEventPress = useCallback((event: Event) => {
     router.push({
@@ -47,9 +46,9 @@ export default function CalendarScreen() {
   const handleAddEvent = useCallback(() => {
     router.push({
       pathname: '/event/create' as any,
-      params: { date: selectedDateStr },
+      params: { date: getTodayString() },
     });
-  }, [router, selectedDateStr]);
+  }, [router]);
 
   const renderEvent = useCallback(
     ({ item }: { item: Event }) => (
@@ -58,11 +57,29 @@ export default function CalendarScreen() {
     [handleEventPress]
   );
 
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: Section }) => {
+      const today = getTodayString();
+      const isToday = section.title === today;
+      return (
+        <View style={[styles.sectionHeader, { backgroundColor: colors.background }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+            {isToday ? '今天' : formatDateDisplay(section.title)}
+          </Text>
+        </View>
+      );
+    },
+    [colors]
+  );
+
   const renderEmptyList = () => (
     <View style={styles.emptyContainer}>
-      <IconSymbol name="calendar" size={48} color={colors.muted} />
+      <IconSymbol name="list.bullet" size={48} color={colors.muted} />
+      <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+        暂无日程
+      </Text>
       <Text style={[styles.emptyText, { color: colors.muted }]}>
-        暂无日程安排
+        点击下方按钮添加您的第一个日程
       </Text>
       <Pressable
         onPress={handleAddEvent}
@@ -72,6 +89,7 @@ export default function CalendarScreen() {
           pressed && { opacity: 0.8 },
         ]}
       >
+        <IconSymbol name="plus" size={18} color="#FFFFFF" />
         <Text style={styles.addButtonText}>添加日程</Text>
       </Pressable>
     </View>
@@ -80,7 +98,7 @@ export default function CalendarScreen() {
   return (
     <ScreenContainer>
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>日历</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>日程</Text>
         <Pressable
           onPress={handleAddEvent}
           style={({ pressed }) => [
@@ -93,27 +111,19 @@ export default function CalendarScreen() {
         </Pressable>
       </View>
 
-      <Calendar
-        currentMonth={currentMonth}
-        selectedDate={selectedDate}
-        onSelectDate={handleSelectDate}
-        onPrevMonth={handlePrevMonth}
-        onNextMonth={handleNextMonth}
-      />
-
-      <View style={styles.eventsSection}>
-        <Text style={[styles.dateLabel, { color: colors.foreground }]}>
-          {formatDateDisplay(selectedDateStr)}
-        </Text>
-        <FlatList
-          data={selectedEvents}
+      {sections.length === 0 ? (
+        renderEmptyList()
+      ) : (
+        <SectionList
+          sections={sections}
           renderItem={renderEvent}
+          renderSectionHeader={renderSectionHeader}
           keyExtractor={(item) => item.id}
-          ListEmptyComponent={renderEmptyList}
-          contentContainerStyle={selectedEvents.length === 0 ? styles.emptyListContent : undefined}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={true}
         />
-      </View>
+      )}
     </ScreenContainer>
   );
 }
@@ -137,37 +147,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  eventsSection: {
-    flex: 1,
-    marginTop: 16,
+  listContent: {
+    paddingBottom: 20,
   },
-  dateLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+  sectionHeader: {
     paddingHorizontal: 20,
-    marginBottom: 12,
+    paddingVertical: 8,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40,
-    gap: 12,
+    paddingHorizontal: 40,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
   },
   emptyText: {
-    fontSize: 15,
-  },
-  emptyListContent: {
-    flexGrow: 1,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 24,
+    marginTop: 16,
+    gap: 6,
   },
   addButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
   },
 });
